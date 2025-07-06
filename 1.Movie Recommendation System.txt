@@ -1,0 +1,78 @@
+1.Movie Recommendation System
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from surprise import Dataset, Reader, SVD
+from surprise.model_selection import train_test_split
+import warnings
+warnings.filterwarnings("ignore")
+
+movies = pd.read_csv('https://raw.githubusercontent.com/zygmuntz/goodbooks-10k/master/movies.csv')
+ratings = pd.read_csv('https://raw.githubusercontent.com/zygmuntz/goodbooks-10k/master/ratings.csv')
+
+def content_based_recommend(movie_title, top_n=5):
+    # Fill missing genres
+    movies['genres'] = movies['genres'].fillna('')
+    
+    # Create TF-IDF matrix
+    tfidf = TfidfVectorizer(stop_words='english')
+    tfidf_matrix = tfidf.fit_transform(movies['genres'])
+    
+    # Compute cosine similarity
+    cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+    
+    # Create index mapping
+    indices = pd.Series(movies.index, index=movies['title']).drop_duplicates()
+
+    # Get index of the movie
+    idx = indices.get(movie_title)
+    if idx is None:
+        return ["Movie not found!"]
+    
+    # Get similarity scores
+    sim_scores = list(enumerate(cosine_sim[idx]))
+    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+    sim_scores = sim_scores[1:top_n+1]
+    
+    movie_indices = [i[0] for i in sim_scores]
+    return movies['title'].iloc[movie_indices].tolist()
+
+# --- Collaborative Filtering using Surprise ---
+def collaborative_recommend(user_id, top_n=5):
+    reader = Reader(rating_scale=(0.5, 5.0))
+    data = Dataset.load_from_df(ratings[['userId', 'movieId', 'rating']], reader)
+    trainset, testset = train_test_split(data, test_size=0.25)
+    
+    algo = SVD()
+    algo.fit(trainset)
+    
+    # Predict all unrated movies for this user
+    movie_ids = movies['movieId'].unique()
+    user_movies = ratings[ratings['userId'] == user_id]['movieId'].values
+    unseen = [m for m in movie_ids if m not in user_movies]
+    
+    predictions = [algo.predict(user_id, movie_id) for movie_id in unseen]
+    predictions.sort(key=lambda x: x.est, reverse=True)
+    
+    top_movie_ids = [pred.iid for pred in predictions[:top_n]]
+    return movies[movies['movieId'].isin(top_movie_ids)]['title'].tolist()
+
+if __name__ == "__main__":
+    print("📽️ Movie Recommendation System")
+    choice = input("Choose method:\n1. Content-Based\n2. Collaborative Filtering\nEnter 1 or 2: ")
+    
+    if choice == '1':
+        movie = input("Enter a movie title: ")
+        results = content_based_recommend(movie)
+        print("\n🎬 Recommended movies (Content-Based):")
+        for m in results:
+            print(" -", m)
+    
+    elif choice == '2':
+        user_id = int(input("Enter user ID (1-610): "))
+        results = collaborative_recommend(user_id)
+        print("\n🎬 Recommended movies (Collaborative):")
+        for m in results:
+            print(" -", m)
+    else:
+        print("Invalid choice.")
